@@ -16,6 +16,7 @@ import sys
 import json
 from pathlib import Path
 from mcp.server.mcpserver import MCPServer
+from starlette.responses import HTMLResponse
 from excel_loader import load_workbook, get_summary
 
 # ── Init MCP Server ───────────────────────────────────────────────────────────
@@ -43,14 +44,57 @@ def get_data():
 
     current_mtime = os.path.getmtime(EXCEL_PATH)
 
-    # If cache is empty OR file has been modified/saved on disk, reload!
     if _DATA_CACHE is None or current_mtime > _LAST_MODIFIED_TIME:
-        print(f"[AUTO-RELOAD] Detected updated Excel file. Loading newest changes...")
+        print("[AUTO-RELOAD] Detected updated Excel file. Loading newest changes...")
         _DATA_CACHE = load_workbook(EXCEL_PATH)
         _LAST_MODIFIED_TIME = current_mtime
-        print(f"[AUTO-RELOAD] Successfully refreshed with latest data!")
+        print("[AUTO-RELOAD] Successfully refreshed with latest data!")
 
     return _DATA_CACHE
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 0. ROOT WELCOME PAGE & HEALTH CHECK (For browsers & Render)
+# ═════════════════════════════════════════════════════════════════════════════
+@server.custom_route("/", methods=["GET", "HEAD"])
+async def root_page(request):
+    html_content = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eastwind Proposals MCP Service</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+        .card { background: #1e293b; padding: 2.5rem; border-radius: 1rem; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); max-width: 600px; text-align: center; border: 1px solid #334155; }
+        h1 { color: #38bdf8; margin-top: 0; font-size: 1.8rem; }
+        .badge { background: #10b981; color: white; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.875rem; font-weight: 600; display: inline-block; margin-bottom: 1.5rem; }
+        p { color: #94a3b8; line-height: 1.6; }
+        .code-box { background: #0f172a; padding: 1rem; border-radius: 0.5rem; text-align: left; font-family: monospace; font-size: 0.9rem; color: #e2e8f0; border: 1px solid #334155; overflow-x: auto; margin: 1.5rem 0; }
+        .url { color: #a855f7; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <span class="badge">● Service Live & Operational</span>
+        <h1>Eastwind Proposals Mail Tracker</h1>
+        <p>This is a <strong>Model Context Protocol (MCP) Cloud Server</strong> designed for <strong>Claude Desktop</strong> integration.</p>
+        
+        <p>To connect Claude Desktop to this service, use the <strong>/sse</strong> endpoint:</p>
+        <div class="code-box">
+{<br>
+&nbsp;&nbsp;"mcpServers": {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;"eastwind-proposals": {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"url": "<span class="url">https://eastwind-mail-tracker.onrender.com/sse</span>"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;}<br>
+&nbsp;&nbsp;}<br>
+}
+        </div>
+        <p style="font-size: 0.85rem; color: #64748b;">Powered by FastMCP v2 & Anthropic Model Context Protocol</p>
+    </div>
+</body>
+</html>"""
+    return HTMLResponse(content=html_content)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -184,10 +228,6 @@ def get_users_sheet() -> str:
     description="Get all master reference lists from 'MT_Lists' sheet (All valid Categories, Statuses, Priorities, and Tones with Sort Order and Closed flags).",
 )
 def get_master_lists_sheet(filter_type: str = "") -> str:
-    """
-    Args:
-        filter_type: Optional filter by Type ('Category', 'Status', or 'Priority')
-    """
     data = get_data()
     lists = data.get("MT_Lists", [])
     if filter_type:
@@ -216,12 +256,6 @@ def get_settings_sheet() -> str:
     description="Query user audit history and change logs from 'MT_Audit' sheet (User, Action, Field, Old Value, New Value, Timestamp).",
 )
 def get_audit_log_sheet(user: str = "", action: str = "", limit: int = 50) -> str:
-    """
-    Args:
-        user: Optional filter by user (e.g. 'Salih')
-        action: Optional filter by action (e.g. 'AdminUserChange', 'AdminReferenceDelete')
-        limit: Max records to return (default 50)
-    """
     data = get_data()
     audits = data.get("MT_Audit", [])
     results = []
@@ -237,7 +271,7 @@ def get_audit_log_sheet(user: str = "", action: str = "", limit: int = 50) -> st
         return "No audit logs found matching criteria."
 
     total = len(results)
-    limited = results[-limit:]  # get latest
+    limited = results[-limit:]
     return f"Total matching audit events: {total} (showing latest {len(limited)}):\n\n" + json.dumps(limited, ensure_ascii=False, indent=2)
 
 
@@ -249,11 +283,6 @@ def get_audit_log_sheet(user: str = "", action: str = "", limit: int = 50) -> st
     description="Read data from any sheet in the workbook by its exact name: 'Email Tracker', 'Dashboard', 'Settings', 'MT_Users', 'MT_Lists', 'MT_Settings', or 'MT_Audit'.",
 )
 def read_any_sheet(sheet_name: str, limit: int = 50) -> str:
-    """
-    Args:
-        sheet_name: Exact name of sheet
-        limit: Max rows to return
-    """
     data = get_data()
     if sheet_name not in data:
         available = list(data.keys())
