@@ -11,6 +11,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY excel_loader.py .
+COPY query_engine.py .
 COPY mcp_server.py .
 COPY server_cloud.py .
 COPY Eastwind_Proposals_-_Mail_Tracker.xlsx .
