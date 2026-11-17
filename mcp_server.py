@@ -16,8 +16,9 @@ import sys
 import json
 from pathlib import Path
 from mcp.server.mcpserver import MCPServer
-from starlette.responses import HTMLResponse
+from starlette.responses import HTMLResponse, JSONResponse
 from excel_loader import load_workbook, get_summary
+from query_engine import process_query
 
 # ── Init MCP Server ───────────────────────────────────────────────────────────
 server = MCPServer(name="Eastwind Mail Tracker")
@@ -54,47 +55,283 @@ def get_data():
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 0. ROOT WELCOME PAGE & HEALTH CHECK (For browsers & Render)
+# 0. ROOT CHAT PORTAL & API ENDPOINTS
 # ═════════════════════════════════════════════════════════════════════════════
 @server.custom_route("/", methods=["GET", "HEAD"])
-async def root_page(request):
+@server.custom_route("/chat", methods=["GET", "HEAD"])
+async def root_chat_portal(request):
     html_content = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Eastwind Proposals MCP Service</title>
+    <title>Eastwind Proposals AI Assistant</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
-        .card { background: #1e293b; padding: 2.5rem; border-radius: 1rem; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); max-width: 600px; text-align: center; border: 1px solid #334155; }
-        h1 { color: #38bdf8; margin-top: 0; font-size: 1.8rem; }
-        .badge { background: #10b981; color: white; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.875rem; font-weight: 600; display: inline-block; margin-bottom: 1.5rem; }
-        p { color: #94a3b8; line-height: 1.6; }
-        .code-box { background: #0f172a; padding: 1rem; border-radius: 0.5rem; text-align: left; font-family: monospace; font-size: 0.9rem; color: #e2e8f0; border: 1px solid #334155; overflow-x: auto; margin: 1.5rem 0; }
-        .url { color: #a855f7; font-weight: bold; }
+        :root {
+            --bg-dark: #0f172a;
+            --card-dark: #1e293b;
+            --border: #334155;
+            --accent: #38bdf8;
+            --accent-hover: #0284c7;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --user-bubble: #0369a1;
+            --bot-bubble: #1e293b;
+            --badge: #10b981;
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-main);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        header {
+            background: var(--card-dark);
+            border-bottom: 1px solid var(--border);
+            padding: 0.9rem 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header-left { display: flex; align-items: center; gap: 0.75rem; }
+        .logo-icon {
+            width: 38px; height: 38px; border-radius: 8px;
+            background: linear-gradient(135deg, #0284c7, #38bdf8);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.2rem; font-weight: bold; color: white;
+        }
+        .header-title h1 { margin: 0; font-size: 1.15rem; color: var(--text-main); }
+        .header-title p { margin: 0; font-size: 0.78rem; color: var(--text-muted); }
+        .badge {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--badge);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            padding: 0.3rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            display: flex; align-items: center; gap: 0.4rem;
+        }
+        .badge-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--badge); }
+
+        #chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+            max-width: 950px;
+            width: 100%;
+            margin: 0 auto;
+        }
+        .message-row { display: flex; gap: 0.75rem; width: 100%; }
+        .message-row.user { justify-content: flex-end; }
+        .avatar {
+            width: 32px; height: 32px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.85rem; font-weight: bold; flex-shrink: 0;
+        }
+        .avatar.bot { background: #0284c7; color: white; }
+        .avatar.user { background: #64748b; color: white; }
+        .bubble {
+            max-width: 82%;
+            padding: 1rem 1.25rem;
+            border-radius: 1rem;
+            font-size: 0.92rem;
+            line-height: 1.6;
+        }
+        .bubble.user {
+            background: var(--user-bubble);
+            color: white;
+            border-bottom-right-radius: 0.2rem;
+        }
+        .bubble.bot {
+            background: var(--bot-bubble);
+            color: var(--text-main);
+            border: 1px solid var(--border);
+            border-bottom-left-radius: 0.2rem;
+        }
+        .bubble table {
+            width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 0.82rem;
+        }
+        .bubble th, .bubble td {
+            border: 1px solid var(--border); padding: 0.45rem 0.6rem; text-align: left;
+        }
+        .bubble th { background: rgba(255,255,255,0.06); color: var(--accent); }
+        .bubble tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+        .bubble code { background: #0f172a; padding: 0.15rem 0.35rem; border-radius: 4px; font-family: monospace; font-size: 0.85rem; color: #f472b6; }
+        .bubble pre code { display: block; padding: 0.75rem; overflow-x: auto; color: #e2e8f0; }
+
+        .suggestions {
+            display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem;
+        }
+        .chip {
+            background: #0f172a; border: 1px solid var(--border);
+            color: #cbd5e1; padding: 0.35rem 0.75rem; border-radius: 9999px;
+            font-size: 0.78rem; cursor: pointer; transition: all 0.2s;
+        }
+        .chip:hover { border-color: var(--accent); color: var(--accent); background: rgba(56, 189, 248, 0.08); }
+
+        #input-panel {
+            background: var(--card-dark);
+            border-top: 1px solid var(--border);
+            padding: 1rem 1.5rem;
+        }
+        .input-wrapper {
+            max-width: 950px; margin: 0 auto; display: flex; gap: 0.75rem;
+        }
+        input[type="text"] {
+            flex: 1; background: #0f172a; border: 1px solid var(--border);
+            color: var(--text-main); padding: 0.85rem 1.1rem; border-radius: 0.65rem;
+            font-size: 0.95rem; outline: none; transition: border-color 0.2s;
+        }
+        input[type="text"]:focus { border-color: var(--accent); }
+        button.send-btn {
+            background: linear-gradient(135deg, #0284c7, #38bdf8);
+            border: none; color: white; padding: 0.85rem 1.4rem;
+            border-radius: 0.65rem; font-weight: 600; cursor: pointer;
+            transition: opacity 0.2s; display: flex; align-items: center; gap: 0.4rem;
+        }
+        button.send-btn:hover { opacity: 0.9; }
+        .loading-dots span {
+            animation: blink 1.4s infinite both; font-size: 1.4rem; line-height: 0;
+        }
+        .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes blink { 0%, 80%, 100% { opacity: 0; } 40% { opacity: 1; } }
     </style>
 </head>
 <body>
-    <div class="card">
-        <span class="badge">● Service Live & Operational</span>
-        <h1>Eastwind Proposals Mail Tracker</h1>
-        <p>This is a <strong>Model Context Protocol (MCP) Cloud Server</strong> designed for <strong>Claude Desktop</strong> integration.</p>
-        
-        <p>To connect Claude Desktop to this service, use the <strong>/sse</strong> endpoint:</p>
-        <div class="code-box">
-{<br>
-&nbsp;&nbsp;"mcpServers": {<br>
-&nbsp;&nbsp;&nbsp;&nbsp;"eastwind-proposals": {<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"url": "<span class="url">https://eastwind-mail-tracker.onrender.com/sse</span>"<br>
-&nbsp;&nbsp;&nbsp;&nbsp;}<br>
-&nbsp;&nbsp;}<br>
-}
+    <header>
+        <div class="header-left">
+            <div class="logo-icon">EW</div>
+            <div class="header-title">
+                <h1>Eastwind Proposals Assistant</h1>
+                <p>Live Mail Tracker Intelligence Portal</p>
+            </div>
         </div>
-        <p style="font-size: 0.85rem; color: #64748b;">Powered by FastMCP v2 & Anthropic Model Context Protocol</p>
+        <div class="badge">
+            <div class="badge-dot"></div>
+            <span>3,016 Records Live</span>
+        </div>
+    </header>
+
+    <div id="chat-container">
+        <div class="message-row">
+            <div class="avatar bot">AI</div>
+            <div class="bubble bot">
+                <strong>Hello! Welcome to the Eastwind Proposals Portal.</strong><br>
+                I have full access to all 7 sheets of the master Excel workbook. You can query live proposals, KPIs, assignee workloads, and master lists directly from your browser.
+                
+                <div class="suggestions">
+                    <span class="chip" onclick="sendSuggestion('Show me all overdue proposals')">⚠️ Overdue Proposals</span>
+                    <span class="chip" onclick="sendSuggestion('What are the KPIs from the Dashboard?')">📊 Dashboard KPIs</span>
+                    <span class="chip" onclick="sendSuggestion('Show proposals assigned to Midlaj')">👤 Midlaj Proposals</span>
+                    <span class="chip" onclick="sendSuggestion('Show proposals assigned to Anargha')">👤 Anargha Proposals</span>
+                    <span class="chip" onclick="sendSuggestion('List all team members in MT_Users')">👥 Team Structure</span>
+                    <span class="chip" onclick="sendSuggestion('Show master categories and statuses')">📋 Master Lists</span>
+                    <span class="chip" onclick="sendSuggestion('Show recent audit logs')">📜 Recent Audit Logs</span>
+                </div>
+            </div>
+        </div>
     </div>
+
+    <div id="input-panel">
+        <form class="input-wrapper" onsubmit="handleSend(event)">
+            <input type="text" id="userInput" placeholder="Ask anything about proposals, KPIs, assignees, or overdue items..." autocomplete="off">
+            <button type="submit" class="send-btn">Send ➔</button>
+        </form>
+    </div>
+
+    <script>
+        const chatContainer = document.getElementById('chat-container');
+        const userInput = document.getElementById('userInput');
+
+        function appendMessage(sender, text, isMarkdown = true) {
+            const row = document.createElement('div');
+            row.className = 'message-row ' + sender;
+            
+            const avatar = document.createElement('div');
+            avatar.className = 'avatar ' + sender;
+            avatar.innerText = sender === 'user' ? 'You' : 'AI';
+            
+            const bubble = document.createElement('div');
+            bubble.className = 'bubble ' + sender;
+            if (sender === 'bot' && isMarkdown && window.marked) {
+                bubble.innerHTML = marked.parse(text);
+            } else {
+                bubble.innerText = text;
+            }
+
+            if (sender === 'user') {
+                row.appendChild(bubble);
+                row.appendChild(avatar);
+            } else {
+                row.appendChild(avatar);
+                row.appendChild(bubble);
+            }
+
+            chatContainer.appendChild(row);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+            return bubble;
+        }
+
+        async function handleSend(e) {
+            if (e) e.preventDefault();
+            const text = userInput.value.trim();
+            if (!text) return;
+            
+            userInput.value = '';
+            appendMessage('user', text, false);
+
+            const loadingBubble = appendMessage('bot', '<span class="loading-dots">Searching Excel records<span>.</span><span>.</span><span>.</span></span>', false);
+
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: text })
+                });
+
+                const data = await response.json();
+                if (window.marked && data.answer) {
+                    loadingBubble.innerHTML = marked.parse(data.answer);
+                } else {
+                    loadingBubble.innerText = data.answer || "No response received.";
+                }
+            } catch (err) {
+                loadingBubble.innerText = "Error querying live records: " + err.message;
+            }
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function sendSuggestion(text) {
+            userInput.value = text;
+            handleSend();
+        }
+    </script>
 </body>
 </html>"""
     return HTMLResponse(content=html_content)
+
+
+@server.custom_route("/api/chat", methods=["POST"])
+async def api_chat(request):
+    try:
+        body = await request.json()
+        query = body.get("query", "")
+        data = get_data()
+        result = process_query(query, data)
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({"answer": f"Error processing query: {str(e)}", "type": "error"}, status_code=500)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
