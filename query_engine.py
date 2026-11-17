@@ -13,8 +13,16 @@ from typing import Dict, Any, List
 def process_query(query: str, data: Dict[str, Any]) -> Dict[str, Any]:
     q = query.strip().lower()
     
-    # 0. LATEST DATE / MOST RECENT EMAILS
-    if any(k in q for k in ["latest date", "most recent", "newest date", "last date", "latest email", "latest proposal", "recent email", "recent proposal"]) or ("latest" in q and ("date" in q or "email" in q or "tracker" in q or "record" in q)):
+    # 0. LATEST / LAST / MOST RECENT EMAILS OR RECORDS
+    if (
+        any(k in q for k in [
+            "latest date", "most recent", "newest date", "last date", "latest email", 
+            "latest proposal", "recent email", "recent proposal", "last record", 
+            "latest record", "last entry", "latest entry", "newest record"
+        ])
+        or ("latest" in q and any(w in q for w in ["date", "email", "tracker", "record", "entry", "row"]))
+        or ("last" in q and any(w in q for w in ["date", "email", "tracker", "record", "entry", "row", "proposal"]))
+    ):
         rows = data.get("Email Tracker", [])
         valid_rows = [r for r in rows if r.get("Date")]
         if not valid_rows:
