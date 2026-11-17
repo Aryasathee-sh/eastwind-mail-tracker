@@ -13,8 +13,33 @@ from typing import Dict, Any, List
 def process_query(query: str, data: Dict[str, Any]) -> Dict[str, Any]:
     q = query.strip().lower()
     
+    # 0. LATEST DATE / MOST RECENT EMAILS
+    if any(k in q for k in ["latest date", "most recent", "newest date", "last date", "latest email", "latest proposal", "recent email", "recent proposal"]) or ("latest" in q and ("date" in q or "email" in q or "tracker" in q or "record" in q)):
+        rows = data.get("Email Tracker", [])
+        valid_rows = [r for r in rows if r.get("Date")]
+        if not valid_rows:
+            return {"answer": "The Email Tracker sheet is currently empty."}
+        
+        latest_row = valid_rows[-1]
+        latest_date = latest_row.get("Date", "N/A")
+        recent_batch = valid_rows[-10:]
+        subj = str(latest_row.get("Subject", "")).strip('"')
+        
+        md = f"### 📅 Latest Date in Email Tracker: **{latest_date}**\n\n"
+        md += f"The most recent entry recorded is from **{latest_date} at {latest_row.get('Time', '')}**:\n"
+        md += f"- **Subject**: {subj}\n"
+        md += f"- **From**: `{latest_row.get('From', '')}`\n"
+        md += f"- **Assigned To**: **{latest_row.get('Assigned to', '') or 'Unassigned'}**\n"
+        md += f"- **Status**: `{latest_row.get('Status', '')}`\n\n"
+        md += "#### 📩 Most Recent 10 Proposals:\n"
+        md += "| Date | Time | Subject | Assigned To | Status |\n|---|---|---|---|---|\n"
+        for r in reversed(recent_batch):
+            s = str(r.get("Subject", ""))[:35].strip('"')
+            md += f"| {r.get('Date', '')} | {r.get('Time', '')} | {s} | **{r.get('Assigned to', '')}** | `{r.get('Status', '')}` |\n"
+        return {"answer": md, "type": "latest_date"}
+
     # 1. OVERDUE PROPOSALS
-    if any(k in q for k in ["overdue", "delayed", "late", "pending overdue", "past due"]):
+    if any(k in q for k in ["overdue", "delayed", "past due"]) or re.search(r"\\blate\\b", q):
         rows = data.get("Email Tracker", [])
         overdue_items = []
         for r in rows:
