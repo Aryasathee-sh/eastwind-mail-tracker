@@ -200,6 +200,22 @@ async def root_chat_portal(request):
             transition: opacity 0.2s; display: flex; align-items: center; gap: 0.4rem;
         }
         button.send-btn:hover { opacity: 0.9; }
+        .upload-btn {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--border);
+            color: var(--accent);
+            padding: 0.4rem 0.85rem;
+            border-radius: 0.5rem;
+            font-size: 0.82rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex; align-items: center; gap: 0.4rem;
+        }
+        .upload-btn:hover {
+            background: rgba(56, 189, 248, 0.15);
+            border-color: var(--accent);
+        }
         .loading-dots span {
             animation: blink 1.4s infinite both; font-size: 1.4rem; line-height: 0;
         }
@@ -217,9 +233,15 @@ async def root_chat_portal(request):
                 <p>Live Mail Tracker Intelligence Portal</p>
             </div>
         </div>
-        <div class="badge">
-            <div class="badge-dot"></div>
-            <span>3,016 Records Live</span>
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <label for="excelFile" class="upload-btn" title="Upload updated Excel workbook">
+                📁 Upload New Excel
+            </label>
+            <input type="file" id="excelFile" accept=".xlsx" style="display: none;" onchange="handleFileUpload(event)">
+            <div class="badge">
+                <div class="badge-dot"></div>
+                <span id="recordCountText">3,016 Records Live</span>
+            </div>
         </div>
     </header>
 
@@ -316,6 +338,42 @@ async def root_chat_portal(request):
             userInput.value = text;
             handleSend();
         }
+
+        async function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            if (!file.name.endsWith('.xlsx')) {
+                alert('Please select an Excel (.xlsx) file.');
+                return;
+            }
+
+            const loadingBubble = appendMessage('bot', `⏳ Uploading and processing **${file.name}**...`, true);
+
+            try {
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/octet-stream',
+                        'X-Filename': encodeURIComponent(file.name)
+                    },
+                    body: file
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    loadingBubble.innerHTML = marked.parse(`✅ **Workbook Updated Successfully!**\n\n- ${data.message}\n- New records are live and ready to query immediately.`);
+                    if (data.total_records) {
+                        document.getElementById('recordCountText').innerText = `${data.total_records.toLocaleString()} Records Live`;
+                    }
+                } else {
+                    loadingBubble.innerHTML = `❌ Upload failed: ${data.error || 'Unknown error'}`;
+                }
+            } catch (err) {
+                loadingBubble.innerHTML = `❌ Error uploading file: ${err.message}`;
+            }
+            event.target.value = '';
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
     </script>
 </body>
 </html>"""
@@ -332,6 +390,33 @@ async def api_chat(request):
         return JSONResponse(result)
     except Exception as e:
         return JSONResponse({"answer": f"Error processing query: {str(e)}", "type": "error"}, status_code=500)
+
+
+@server.custom_route("/api/upload", methods=["POST"])
+async def api_upload(request):
+    global _DATA_CACHE, _LAST_MODIFIED_TIME
+    try:
+        contents = await request.body()
+        if not contents or len(contents) < 500:
+            return JSONResponse({"success": False, "error": "Invalid or empty file."}, status_code=400)
+
+        # Write uploaded file directly to EXCEL_PATH
+        with open(EXCEL_PATH, "wb") as f:
+            f.write(contents)
+
+        # Force cache reload
+        _DATA_CACHE = None
+        _LAST_MODIFIED_TIME = 0
+        fresh_data = get_data()
+        count = len(fresh_data.get("Email Tracker", []))
+
+        return JSONResponse({
+            "success": True,
+            "message": f"Successfully updated workbook with {count:,} proposal records across all 7 sheets!",
+            "total_records": count
+        })
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
