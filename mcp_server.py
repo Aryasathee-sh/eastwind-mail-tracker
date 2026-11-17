@@ -14,6 +14,9 @@ Provides Claude with access to ALL sheets and tabs:
 import os
 import sys
 import json
+import time
+import tempfile
+import urllib.request
 from pathlib import Path
 from mcp.server.mcpserver import MCPServer
 from starlette.responses import HTMLResponse, JSONResponse
@@ -28,28 +31,63 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_EXCEL = SCRIPT_DIR / "Eastwind_Proposals_-_Mail_Tracker.xlsx"
 
 EXCEL_PATH = os.environ.get("EXCEL_FILE_PATH", str(DEFAULT_EXCEL))
+
+# ── Live SharePoint URL (fetch on every query) ────────────────────────────────
+SHAREPOINT_DOWNLOAD_URL = (
+    "https://gravitybp365.sharepoint.com/:x:/s/GravityProposalManagement/"
+    "IQB2a4F6JCnBRZfwL60RGcQsAaaUrJk1YE_ByL4obrNDnpw?e=VD5aEf&download=1"
+)
+SHAREPOINT_CACHE_TTL = 300  # re-fetch from SharePoint every 5 minutes
 _DATA_CACHE = None
 _LAST_MODIFIED_TIME = 0
+_SHAREPOINT_FETCH_TIME = 0
+
+
+def fetch_from_sharepoint():
+    """Download latest Excel from SharePoint sharing link and reload data."""
+    global _DATA_CACHE, _LAST_MODIFIED_TIME, _SHAREPOINT_FETCH_TIME
+    try:
+        print("[SHAREPOINT] Fetching latest Excel from SharePoint...")
+        req = urllib.request.Request(
+            SHAREPOINT_DOWNLOAD_URL,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            content = resp.read()
+        # Write to a temp file then overwrite the local Excel
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        import shutil
+        shutil.move(tmp_path, EXCEL_PATH)
+        _DATA_CACHE = load_workbook(EXCEL_PATH)
+        _LAST_MODIFIED_TIME = os.path.getmtime(EXCEL_PATH)
+        _SHAREPOINT_FETCH_TIME = time.time()
+        print(f"[SHAREPOINT] ✅ Loaded {len(_DATA_CACHE.get('Email Tracker', []))} rows from SharePoint.")
+    except Exception as e:
+        print(f"[SHAREPOINT] ⚠️ Could not fetch from SharePoint: {e}. Using cached data.")
 
 
 def get_data():
     """
     Returns the workbook data.
-    Automatically detects if the Excel file was edited/saved on disk
-    and reloads the latest records in real-time.
+    Fetches from SharePoint every 5 minutes for live data.
+    Falls back to local file if SharePoint is unreachable.
     """
     global _DATA_CACHE, _LAST_MODIFIED_TIME
 
-    if not os.path.exists(EXCEL_PATH):
-        raise FileNotFoundError(f"Excel workbook not found at: {EXCEL_PATH}")
+    # Try SharePoint fetch if cache is expired
+    if time.time() - _SHAREPOINT_FETCH_TIME > SHAREPOINT_CACHE_TTL:
+        fetch_from_sharepoint()
 
-    current_mtime = os.path.getmtime(EXCEL_PATH)
-
-    if _DATA_CACHE is None or current_mtime > _LAST_MODIFIED_TIME:
-        print("[AUTO-RELOAD] Detected updated Excel file. Loading newest changes...")
-        _DATA_CACHE = load_workbook(EXCEL_PATH)
-        _LAST_MODIFIED_TIME = current_mtime
-        print("[AUTO-RELOAD] Successfully refreshed with latest data!")
+    # Fallback: load local file if cache is still empty
+    if _DATA_CACHE is None:
+        if not os.path.exists(EXCEL_PATH):
+            raise FileNotFoundError(f"Excel workbook not found at: {EXCEL_PATH}")
+        current_mtime = os.path.getmtime(EXCEL_PATH)
+        if _DATA_CACHE is None or current_mtime > _LAST_MODIFIED_TIME:
+            _DATA_CACHE = load_workbook(EXCEL_PATH)
+            _LAST_MODIFIED_TIME = current_mtime
 
     return _DATA_CACHE
 
