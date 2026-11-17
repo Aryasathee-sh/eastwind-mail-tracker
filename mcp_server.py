@@ -54,7 +54,12 @@ def fetch_from_sharepoint():
         )
         with urllib.request.urlopen(req, timeout=30) as resp:
             content = resp.read()
-        # Write to a temp file then overwrite the local Excel
+        # Validate it's a real xlsx (zip) file — first bytes must be PK
+        if not content[:2] == b'PK':
+            print("[SHAREPOINT] ⚠️ Response is not a valid xlsx file (got HTML/redirect). Skipping update.")
+            _SHAREPOINT_FETCH_TIME = time.time()  # don't hammer — wait 5 min before retry
+            return
+        # Write to temp file then overwrite local Excel
         with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
             tmp.write(content)
             tmp_path = tmp.name
@@ -66,6 +71,7 @@ def fetch_from_sharepoint():
         print(f"[SHAREPOINT] ✅ Loaded {len(_DATA_CACHE.get('Email Tracker', []))} rows from SharePoint.")
     except Exception as e:
         print(f"[SHAREPOINT] ⚠️ Could not fetch from SharePoint: {e}. Using cached data.")
+        _SHAREPOINT_FETCH_TIME = time.time()  # wait before retry
 
 
 def get_data():
