@@ -66,7 +66,11 @@ def _get_sheet_map(zf: zipfile.ZipFile) -> dict:
         ]
         target = rid_to_target.get(rid, "")
         if target:
-            path = target if target.startswith("xl/") else f"xl/{target}"
+            target_norm = target.lstrip("/")
+            if target_norm.startswith("xl/"):
+                path = target_norm
+            else:
+                path = f"xl/{target_norm}"
             sheet_map[name] = path
     return sheet_map
 
