@@ -1,0 +1,27 @@
+name: Cloud Sync SharePoint to Render
+
+on:
+  schedule:
+    # Run every 15 minutes automatically in the cloud 24/7
+    - cron: '*/15 * * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub UI anytime
+
+jobs:
+  sync-job:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run Cloud Sync Script
+        env:
+          MS_GRAPH_TOKEN: ${{ secrets.MS_GRAPH_TOKEN }}
+          EXCEL_PATH: Eastwind_Proposals_-_Mail_Tracker.xlsx
+        run: |
+          python cloud_sync.py
