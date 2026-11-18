@@ -30,8 +30,12 @@ def _excel_date(serial: str) -> str:
 
 def _excel_time(serial: str) -> str:
     try:
-        total_minutes = round(float(serial) * 24 * 60)
-        return f"{total_minutes // 60:02d}:{total_minutes % 60:02d}"
+        total_seconds = int(round(float(serial) * 24 * 3600))
+        hours = (total_seconds // 3600) % 24
+        minutes = (total_seconds % 3600) // 60
+        period = "AM" if hours < 12 else "PM"
+        display_hour = hours if 1 <= hours <= 12 else (12 if hours == 0 else hours - 12)
+        return f"{display_hour}:{minutes:02d} {period}"
     except Exception:
         return serial
 
